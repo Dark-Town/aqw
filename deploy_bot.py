@@ -12,7 +12,7 @@ from telegram.ext import (
 # === 🔧 CONFIGURE THESE ===
 BOT_TOKEN = "7653249811:AAFOiZyPE4COoEl3EcEQFOQvVdbePjCSsfg"  # Replace with your bot token
 RAILWAY_API_TOKEN = "03f5e00c-7349-4449-811c-d9cb47e1b1a1"  # Replace with your Railway API token
-PROJECT_ID = "03f5e00c-7349-4449-811c-d9cb47e1b1a1"  # Your Railway Project ID
+PROJECT_ID = "https://railway.com/project/4d2469f7-12c5-4b14-9502-8daa4c3c6f5e/service/3ad3de69-280b-4bba-bf51-80438794d239/settings?environmentId=5c68ed92-87ca-4e7e-b4f7-aae6646595ff"  # Your Railway Project ID
 ENVIRONMENT_ID = None  # Optional: only set if you have custom environments
 
 # === 🛠️ Setup logging ===
