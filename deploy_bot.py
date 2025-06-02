@@ -1,107 +1,122 @@
 import logging
-import time
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, ContextTypes, filters
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, filters, ConversationHandler, ContextTypes
 )
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+from playwright.async_api import async_playwright
 
-# Config
-BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE'
-ADMIN_CHANNEL_ID = -1001234567890  # Replace with your channel ID
-WELCOME_IMAGE_URL = 'https://example.com/welcome.jpg'  # URL of start image
+# CONFIG
+BOT_TOKEN = '653249811:AAFOiZyPE4COoEl3EcEQFOQvVdbePjCSsfg'
+LOG_CHANNEL_ID = -1001234567890  # Replace with your channel ID
+ASK_URL = 1
 
+# Setup logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Set up Selenium
-def get_driver():
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--no-sandbox")
-    return webdriver.Chrome(ChromeDriverManager().install(), options=options)
 
-# Scrape the tool site
-def send_views(url: str) -> str:
-    driver = get_driver()
-    driver.get("https://myinstafollow.com/free-tiktok-views/")
-    time.sleep(5)
-
+# --- Playwright automation ---
+async def send_views_to_tiktok(url: str) -> bool:
     try:
-        input_box = driver.find_element(By.NAME, "url")
-        input_box.send_keys(url)
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context()
+            page = await context.new_page()
 
-        submit = driver.find_element(By.XPATH, "//button[contains(text(), 'Submit')]")
-        submit.click()
+            await page.goto("https://myinstafollow.com/free-tiktok-views/", timeout=60000)
 
-        time.sleep(6)
+            await page.fill("input[name='url']", url)
+            await page.click("button[type='submit']")
 
-        result = driver.find_element(By.CLASS_NAME, "result-area").text
+            await page.wait_for_timeout(5000)
+            html = await page.content()
+
+            await browser.close()
+            return "success" in html.lower() or "views have been sent" in html.lower()
     except Exception as e:
-        result = f"Failed: {e}"
-    finally:
-        driver.quit()
+        logger.error(f"Automation error: {e}")
+        return False
 
-    return result
 
-# Start command
+# --- Telegram Bot Handlers ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🚀 Send TikTok Views", callback_data='send_views')],
-        [InlineKeyboardButton("ℹ️ About", callback_data='about')]
+        [InlineKeyboardButton("🚀 Get TikTok Views", callback_data="get_views")],
+        [InlineKeyboardButton("ℹ️ About", callback_data="about")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_photo(
-        photo=WELCOME_IMAGE_URL,
-        caption="👋 Welcome! Use this bot to send free TikTok views.\nChoose an option below:",
+    await update.message.reply_text(
+        "👋 Welcome!\nUse the button below to get free TikTok views.",
         reply_markup=reply_markup
     )
 
-# Button interactions
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == 'send_views':
-        await query.message.reply_text("🔗 Please send your TikTok video link:")
-        return
-    elif query.data == 'about':
-        await query.message.reply_text("⚡ This bot uses https://myinstafollow.com/free-tiktok-views to send views to TikTok videos.")
+    if query.data == "get_views":
+        await query.message.reply_text("📥 Send your TikTok video URL:")
+        return ASK_URL
 
-# Process TikTok link
-async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text.strip()
-    if "tiktok.com" not in url:
-        await update.message.reply_text("❌ Invalid TikTok URL. Please try again.")
-        return
+    elif query.data == "about":
+        await query.message.reply_text("🤖 This bot sends TikTok views using myinstafollow.com")
+        return ConversationHandler.END
 
-    await update.message.reply_text("⏳ Sending views... Please wait.")
-    result = send_views(url)
 
-    await update.message.reply_text(f"✅ Result:\n{result}")
-
-    # Log to admin channel
+async def receive_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    log_msg = f"👤 User: @{user.username or user.first_name}\n📹 TikTok: {url}\n🟢 Status: {result}"
-    await context.bot.send_message(chat_id=ADMIN_CHANNEL_ID, text=log_msg)
+    tiktok_url = update.message.text
 
-# Main bot setup
+    if "tiktok.com" not in tiktok_url:
+        await update.message.reply_text("❌ That doesn't look like a valid TikTok link.")
+        return ASK_URL
+
+    await update.message.reply_text("⏳ Sending views... Please wait...")
+
+    success = await send_views_to_tiktok(tiktok_url)
+
+    if success:
+        await update.message.reply_text("✅ Views sent successfully!")
+        await context.bot.send_message(
+            chat_id=LOG_CHANNEL_ID,
+            text=f"✅ {user.full_name} (@{user.username or 'NoUsername'}) received views for:\n{tiktok_url}"
+        )
+    else:
+        await update.message.reply_text("❌ Failed to send views. Try again later.")
+
+    return ConversationHandler.END
+
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Cancelled.")
+    return ConversationHandler.END
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(msg="Exception while handling update:", exc_info=context.error)
+
+
+# --- Main Function ---
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(button_handler)],
+        states={ASK_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_url)]},
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
+    app.add_handler(conv_handler)
+    app.add_error_handler(error_handler)
 
     print("Bot is running...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
