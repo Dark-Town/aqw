@@ -1,93 +1,68 @@
 import logging
-import requests
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
+import time
 
-# === 🔧 CONFIGURE THESE ===
-BOT_TOKEN = "7653249811:AAFOiZyPE4COoEl3EcEQFOQvVdbePjCSsfg"  # Replace with your bot token
-RAILWAY_API_TOKEN = "03f5e00c-7349-4449-811c-d9cb47e1b1a1"  # Replace with your Railway API token
-PROJECT_ID = "https://railway.com/project/4d2469f7-12c5-4b14-9502-8daa4c3c6f5e/service/3ad3de69-280b-4bba-bf51-80438794d239/settings?environmentId=5c68ed92-87ca-4e7e-b4f7-aae6646595ff"  # Your Railway Project ID
-ENVIRONMENT_ID = None  # Optional: only set if you have custom environments
+# Enable logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# === 🛠️ Setup logging ===
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Telegram Bot Token
+BOT_TOKEN = '7653249811:AAFOiZyPE4COoEl3EcEQFOQvVdbePjCSsfg'
 
+# Selenium Setup (Headless Chrome)
+def get_driver():
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
+    return driver
 
-# === 🚀 START command ===
+# Scraping Function
+def fetch_tool_info(url: str) -> str:
+    driver = get_driver()
+    driver.get("https://myinstafollow.com/free-tiktok-tools")
+    time.sleep(5)  # Let the page load
+
+    try:
+        # Example interaction: Locate input field and submit URL (customize this for your tool's logic)
+        input_box = driver.find_element(By.NAME, "url")
+        input_box.send_keys(url)
+
+        submit_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Submit')]")
+        submit_btn.click()
+
+        time.sleep(5)  # Wait for results
+
+        # Grab the output text (adjust the selector to fit real result container)
+        result = driver.find_element(By.CLASS_NAME, "result-area").text
+    except Exception as e:
+        result = f"Error while scraping: {str(e)}"
+    finally:
+        driver.quit()
+
+    return result
+
+# Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Welcome to the KHAN-MD2 Deploy Bot!\n\n"
-        "Send me your Telegram **session string** and I will deploy your userbot on Railway.\n\n"
-        "⚠️ Your session string is private. Do not share it with anyone else."
-    )
+    await update.message.reply_text("Send me a TikTok video URL, and I'll fetch info using Free TikTok Tools!")
 
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_url = update.message.text
+    await update.message.reply_text("Fetching info, please wait...")
+    result = fetch_tool_info(user_url)
+    await update.message.reply_text(result)
 
-# === 📤 Handle session input ===
-async def handle_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    session_string = update.message.text.strip()
-
-    if len(session_string) < 20 or "~" not in session_string:
-        await update.message.reply_text("❌ This doesn't look like a valid session string.")
-        return
-
-    await update.message.reply_text("⏳ Deploying your userbot to Railway...")
-
-    query = """
-    mutation SetEnvironmentVariable($input: SetEnvironmentVariableInput!) {
-        setEnvironmentVariable(input: $input) {
-            environmentVariable {
-                id
-                key
-                value
-            }
-        }
-    }
-    """
-
-    variables = {
-        "input": {
-            "projectId": PROJECT_ID,
-            "key": "SESSION_ID",
-            "value": session_string
-        }
-    }
-
-    if ENVIRONMENT_ID:
-        variables["input"]["environmentId"] = ENVIRONMENT_ID
-
-    headers = {
-        "Authorization": f"Bearer {RAILWAY_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    response = requests.post(
-        "https://backboard.railway.app/graphql",
-        json={"query": query, "variables": variables},
-        headers=headers
-    )
-
-    if response.status_code == 200 and "errors" not in response.json():
-        await update.message.reply_text("✅ Userbot deployed successfully on Railway!")
-    else:
-        await update.message.reply_text("❌ Failed to deploy userbot.")
-        logger.error("Railway API Error: %s", response.text)
-
-
-# === 🤖 Launch the bot ===
-if __name__ == "__main__":
-    print("🤖 Starting Telegram Deploy Bot...")
+# Main Bot Setup
+def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_session))
-
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
